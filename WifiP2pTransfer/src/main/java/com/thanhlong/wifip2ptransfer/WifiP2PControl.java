@@ -7,8 +7,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.net.wifi.WpsInfo;
 import android.net.wifi.p2p.WifiP2pConfig;
 import android.net.wifi.p2p.WifiP2pDevice;
@@ -20,7 +22,6 @@ import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.ResultReceiver;
 import android.util.Log;
@@ -36,22 +37,21 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
 public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pManager.ChannelListener, WifiP2pManager.ConnectionInfoListener {
-    public static final int PERMISSIONS_REQUEST_CODE_ACCESS_COARSE_LOCATION = 1100;
+    private static final int PERMISSIONS_REQUEST_CODE_ACCESS_COARSE_LOCATION = 1100;
     private static final String TAG = "Wifip2p";
 
 
-    OnP2PListener onP2PListener;
+    private OnP2PListener onP2PListener;
     public static OnFileTransfer onFileTransfer;
-    boolean isSender = true;
+    private boolean isSender = true;
     private ProgressDialog progressDialog = null;
     private String receiverFolder;
 
@@ -72,7 +72,13 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
     private ArrayList<WifiP2PDevicePIN> listDeviceSearched;
     private HashMap<String, String> listDeviceCheck;
     private String pin = "";
-    FileServerAsyncTask fileServerAsyncTask;
+    private String connectedIP;
+    private boolean connectOnce = false;
+    private SharedPreferences sharedPreferences;
+
+    public String getConnectedIP() {
+        return connectedIP;
+    }
 
     public String getReceiverFolder() {
         return receiverFolder;
@@ -90,7 +96,7 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
         return connectedDevice;
     }
 
-    public void setConnectedDevice(WifiP2PDevicePIN connectedDevice) {
+    private void setConnectedDevice(WifiP2PDevicePIN connectedDevice) {
         this.connectedDevice = connectedDevice;
     }
 
@@ -144,6 +150,8 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
     }
 
     private void init(Activity context) {
+        sharedPreferences = context.getPreferences(Context.MODE_PRIVATE);
+        connectedIP = sharedPreferences.getString("connectedIP",null);
         isWifiP2pReady = false;
         retryChannel = false;
         this.context = context;
@@ -266,8 +274,7 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
                     @Override
                     public void onSuccess() {
                         // Success!
-                        Toast.makeText(context, "Discovery Service Initiated",
-                                Toast.LENGTH_SHORT).show();
+                        //Toast.makeText(context, "Discovery Service Initiated",Toast.LENGTH_SHORT).show();
                     }
 
                     @Override
@@ -281,43 +288,81 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
                 });
 
         manager.setDnsSdResponseListeners(channel, servListener, txtListener);
-        searchDevice();
+        //searchDevice();
     }
 
     public void searchDevice() {
-        manager.discoverServices(channel, new WifiP2pManager.ActionListener() {
-
+        WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if(!wifiManager.isWifiEnabled()){
+            wifiManager.setWifiEnabled(true);
+        }
+        manager.clearServiceRequests(channel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                // Success!
-                isWifiP2pReady = true;
+                init();
+                manager.discoverServices(channel, new WifiP2pManager.ActionListener() {
+
+                    @Override
+                    public void onSuccess() {
+                        // Success!
+                        isWifiP2pReady = true;
 
 
+                    }
+
+                    @Override
+                    public void onFailure(int code) {
+                        // Command failed.  Check for P2P_UNSUPPORTED, ERROR, or BUSY
+                        if (code == WifiP2pManager.P2P_UNSUPPORTED) {
+                            Log.d(TAG, "P2P isn't supported on this deviceSelected.");
+                        }
+                        if (onP2PListener != null) {
+                            onP2PListener.onConnectFailed(code);
+                        }
+                        isWifiP2pReady = false;
+                    }
+                });
             }
 
             @Override
-            public void onFailure(int code) {
-                // Command failed.  Check for P2P_UNSUPPORTED, ERROR, or BUSY
-                if (code == WifiP2pManager.P2P_UNSUPPORTED) {
-                    Log.d(TAG, "P2P isn't supported on this deviceSelected.");
-                }
-                if (onP2PListener != null) {
-                    onP2PListener.onConnectFailed(code);
-                }
-                isWifiP2pReady = false;
+            public void onFailure(int i) {
+                Log.d(TAG, "FAILED to clear service requests ");
+                manager.discoverServices(channel, new WifiP2pManager.ActionListener() {
+
+                    @Override
+                    public void onSuccess() {
+                        // Success!
+                        isWifiP2pReady = true;
+
+
+                    }
+
+                    @Override
+                    public void onFailure(int code) {
+                        // Command failed.  Check for P2P_UNSUPPORTED, ERROR, or BUSY
+                        if (code == WifiP2pManager.P2P_UNSUPPORTED) {
+                            Log.d(TAG, "P2P isn't supported on this deviceSelected.");
+                        }
+                        if (onP2PListener != null) {
+                            onP2PListener.onConnectFailed(code);
+                        }
+                        isWifiP2pReady = false;
+                    }
+                });
             }
         });
+
+
     }
 
     public void connect(final WifiP2PDevicePIN device) {
         this.selectThisDevice(device);
-
         WifiP2pConfig config = new WifiP2pConfig();
         config.deviceAddress = device.deviceAddress;
         config.wps.setup = WpsInfo.PBC;
-        config.groupOwnerIntent = 15;
-        if (isSender) {
-            config.groupOwnerIntent = 0;
+        //config.groupOwnerIntent = 15;
+        if (!isSender) {
+            config.groupOwnerIntent = 15;
         }
         if (onP2PListener != null) {
             onP2PListener.onConnecting(device);
@@ -411,11 +456,23 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
     public void onConnectionInfoAvailable(WifiP2pInfo info) {
         //connected
         this.info = info;
+        new FileServerAsyncTask(context,receiverFolder).execute();
         if (info.groupFormed && info.isGroupOwner) {
             setSender(false);
-            new FileServerAsyncTask(context,receiverFolder).execute();
+
+            //new FileServerAsyncTask(context,receiverFolder).execute();
         } else if (info.groupFormed) {
             setSender(true);
+
+            if(!connectOnce){
+                new Handler().postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        connectOnce = true;
+                        connectToClient();
+                    }
+                },100);
+            }
             // The other device acts as the client. In this case, we enable the
             // get file button.
 
@@ -426,7 +483,8 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
             } else {
                 WifiP2PDevicePIN devicePIN = new WifiP2PDevicePIN();
                 devicePIN.setPIN(pin);
-                devicePIN.deviceName = "Connected";
+                devicePIN.deviceName = info.groupOwnerAddress.getHostAddress();
+
                 onP2PListener.onConnected(devicePIN);
             }
         }
@@ -442,7 +500,6 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
 
 
     }
-
     public void sendFile(String path) {
         File file = new File(path);
         if (file.exists()) {
@@ -454,8 +511,6 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
             serviceIntent.setAction(FileTransferService.ACTION_SEND_FILE);
             serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_PATH, Uri.fromFile(file).toString());
             serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_NAME, file.getName());
-            serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_ADDRESS,
-                    info.groupOwnerAddress.getHostAddress());
             serviceIntent.putExtra(FileTransferService.EXTRAS_LISTENER, new ResultReceiver(new Handler()) {
                 @Override
                 protected void onReceiveResult(int resultCode, Bundle resultData) {
@@ -475,11 +530,90 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
                 }
             });
             serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_PORT, 8988);
-            context.startService(serviceIntent);
+            if(isSender) {
+                serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_ADDRESS,
+                        info.groupOwnerAddress.getHostAddress());
+                context.startService(serviceIntent);
+            }else {
+                if(connectedIP==null){
+
+                    connectedIP = sharedPreferences.getString("connectedIP",null);
+                }
+                if(connectedIP!=null){
+                    serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_ADDRESS,
+                            connectedIP);
+                    context.startService(serviceIntent);
+                }else {
+                    Toast.makeText(context, "App had been forced close! Please reconnect again!", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+
         } else {
             if (onFileTransfer != null) {
                 onFileTransfer.onCopyFailed("File not found.");
             }
+        }
+
+    }
+    private void connectToClient() {
+        try {
+            Intent serviceIntent = new Intent(context, FileTransferService.class);
+            serviceIntent.setAction(FileTransferService.ACTION_SEND_FILE);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_PATH, "request");
+            serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_NAME, "connecting");
+            serviceIntent.putExtra(FileTransferService.EXTRAS_FIRST_CONNECT, true);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_ADDRESS,
+                    info.groupOwnerAddress.getHostAddress());
+            serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_PORT, 8988);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_LISTENER, new ResultReceiver(new Handler()) {
+                @Override
+                protected void onReceiveResult(int resultCode, Bundle resultData) {
+                    super.onReceiveResult(resultCode, resultData);
+                    if (resultCode == Activity.RESULT_OK) {
+                        Log.i(TAG, "+++++++++++++Connect to client success++++++++++++");
+                    } else {
+                        Log.i(TAG, "+++++++++++++Connect fail to client++++++++++++");
+                    }
+                }
+            });
+            context.startService(serviceIntent);
+//            Socket socket = new Socket();
+//            socket.bind(null);
+//            socket.connect((new InetSocketAddress(info.groupOwnerAddress.getHostAddress(), 8988)), 5000);
+        }catch (Exception e){
+
+        }
+
+    }
+
+    private void notifySendFileSuccess() {
+        try {
+            Intent serviceIntent = new Intent(context, FileTransferService.class);
+            serviceIntent.setAction(FileTransferService.ACTION_SEND_FILE);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_PATH, "sendFile");
+            serviceIntent.putExtra(FileTransferService.EXTRAS_FILE_NAME, "success");
+            serviceIntent.putExtra(FileTransferService.EXTRAS_MODE_SEND_SUCCESS, true);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_ADDRESS,
+                    connectedIP);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_GROUP_OWNER_PORT, 8988);
+            serviceIntent.putExtra(FileTransferService.EXTRAS_LISTENER, new ResultReceiver(new Handler()) {
+                @Override
+                protected void onReceiveResult(int resultCode, Bundle resultData) {
+                    super.onReceiveResult(resultCode, resultData);
+                    if (resultCode == Activity.RESULT_OK) {
+                        Log.i(TAG, "+++++++++++++Notify to client success++++++++++++");
+                    } else {
+                        Log.i(TAG, "+++++++++++++Notify fail to client++++++++++++");
+                    }
+                }
+            });
+            context.startService(serviceIntent);
+//            Socket socket = new Socket();
+//            socket.bind(null);
+//            socket.connect((new InetSocketAddress(info.groupOwnerAddress.getHostAddress(), 8988)), 5000);
+        }catch (Exception e){
+
         }
 
     }
@@ -499,7 +633,7 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
         }
     }
 
-    public void onInitiateDiscovery() {
+    private void onInitiateDiscovery() {
 //        if (progressDialog != null && progressDialog.isShowing()) {
 //            progressDialog.dismiss();
 //        }
@@ -517,16 +651,23 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
         }
     }
 
-    public void selectThisDevice(WifiP2PDevicePIN device) {
+    private void selectThisDevice(WifiP2PDevicePIN device) {
         this.deviceSelected = device;
     }
 
     public void resetData() {
+        sharedPreferences = context.getPreferences(Context.MODE_PRIVATE);
+        sharedPreferences.edit().clear().apply();
+        connectOnce = false;
+        connectedIP = null;
         deviceSelected = null;
         isWifiP2pReady = false;
         listDeviceSearched = new ArrayList<>();
         bundle = new Bundle();
         listDeviceCheck = new HashMap<>();
+        if(onP2PListener!=null){
+            onP2PListener.onDisconnected(true);
+        }
     }
 
     public WifiP2pManager getManager() {
@@ -581,6 +722,9 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
                     dirs.mkdirs();
             } catch (Exception e) {
                 receiveFolder = context.getExternalFilesDir("received").getAbsolutePath();
+                File dirs = new File(receiveFolder);
+                if (!dirs.exists())
+                    dirs.mkdirs();
             }
 
             try {
@@ -588,16 +732,27 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
                 Log.d(TAG, "Server: Socket opened");
                 Socket client = serverSocket.accept();
                 Log.d(TAG, "Server: connection done");
-
+                Log.d(TAG, "Client: IP "+client.getRemoteSocketAddress());
+                connectedIP = (((InetSocketAddress) client.getRemoteSocketAddress()).getAddress()).toString().replace("/","");
+                sharedPreferences.edit().putString("connectedIP",connectedIP).apply();
                 //InputStream inputStream = client.getInputStream();
-
 
                 BufferedInputStream in = new BufferedInputStream(client.getInputStream());
                 DataInputStream inputStream = new DataInputStream(in);
                 String fileName = inputStream.readUTF();
                 long length = inputStream.readLong();
+                String fromDevice = inputStream.readUTF();
+                boolean sendSuccess = inputStream.readBoolean();
+                WifiP2PDevicePIN from = new WifiP2PDevicePIN();
+                from.deviceName = fromDevice;
+                selectThisDevice(from);
                 final File f = new File(this.receiveFolder,
                         fileName);
+                if(sendSuccess){
+                    Log.e(TAG, "File received success ");
+                    return "sendSuccess";
+                }
+
 
                 File dirs = new File(f.getParent());
                 if (!dirs.exists())
@@ -637,13 +792,14 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
 
                 serverSocket.close();
                 return f.getAbsolutePath();
-            } catch (IOException e) {
-                Log.e(TAG, e.getMessage());
+            } catch (Exception e) {
+                //Log.e(TAG, e.getMessage());
                 if (WifiP2PControl.onFileTransfer != null) {
                     WifiP2PControl.onFileTransfer.onCopyFailed(e.getMessage());
                 }
                 return null;
             }
+
         }
 
         /*
@@ -661,11 +817,15 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
         protected void onPostExecute(String result) {
             if (result != null) {
                 Log.e(TAG, "File copied - " + result);
-                new FileServerAsyncTask(context,receiverFolder)
-                        .execute();
                 if (WifiP2PControl.onFileTransfer != null) {
                     WifiP2PControl.onFileTransfer.onCopied();
                 }
+                if(result.equals("sendSuccess")){
+                    notifySendFileSuccess();
+                }
+
+                new FileServerAsyncTask(context,receiverFolder)
+                        .execute();
 //                File recvFile = new File(result);
 //                Uri fileUri = FileProvider.getUriForFile(
 //                        context,
@@ -677,6 +837,7 @@ public class WifiP2PControl implements WifiP2pManager.PeerListListener, WifiP2pM
 //                intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 //                context.startActivity(intent);
             }
+
 
         }
 

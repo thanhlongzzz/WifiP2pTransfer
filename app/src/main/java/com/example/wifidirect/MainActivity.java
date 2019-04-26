@@ -155,11 +155,11 @@ public class MainActivity extends AppCompatActivity {
 
     }
     private void updateView() {
-        if(wifiControl.isSender()){
-            ln_send.setVisibility(View.VISIBLE);
-        }else {
-            ln_send.setVisibility(View.GONE);
-        }
+//        if(wifiControl.isSender()){
+//            ln_send.setVisibility(View.VISIBLE);
+//        }else {
+//            ln_send.setVisibility(View.GONE);
+//        }
         String path = Environment.getExternalStorageDirectory() + "/BackupAndRestore/abc.txt";
         ed_path.setText(path);
         btnSend.setOnClickListener(new View.OnClickListener() {

@@ -4,6 +4,15 @@ import android.net.wifi.p2p.WifiP2pDevice;
 
 public class WifiP2PDevicePIN extends WifiP2pDevice {
     String PIN = "";
+    WifiP2pDevice source;
+
+    public WifiP2pDevice getSource() {
+        return source;
+    }
+
+    public void setSource(WifiP2pDevice source) {
+        this.source = source;
+    }
 
     public String getPIN() {
         return PIN;
@@ -23,5 +32,11 @@ public class WifiP2PDevicePIN extends WifiP2pDevice {
 
     public WifiP2PDevicePIN(WifiP2pDevice source) {
         super(source);
+        this.source = source;
+    }
+    public WifiP2PDevicePIN(String PIN,WifiP2pDevice source) {
+        super(source);
+        this.source = source;
+        this.PIN = PIN;
     }
 }

@@ -63,6 +63,10 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
             if (state == WifiP2pManager.WIFI_P2P_STATE_ENABLED) {
                 // Wifi Direct mode is enabled
                 control.setWifiP2pEnabled(true);
+                if(control.getConnectedIP()==null){
+                    control.init();
+                    control.searchDevice();
+                }
             } else {
                 control.resetData();
                 control.setWifiP2pEnabled(false);
@@ -98,8 +102,8 @@ public class WiFiDirectBroadcastReceiver extends BroadcastReceiver {
             }
         } else if (WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION.equals(action)) {
             //connected
-            control.selectThisDevice(new WifiP2PDevicePIN((WifiP2pDevice) intent.getParcelableExtra(
-                    WifiP2pManager.EXTRA_WIFI_P2P_DEVICE)));
+//            control.selectThisDevice(new WifiP2PDevicePIN((WifiP2pDevice) intent.getParcelableExtra(
+//                    WifiP2pManager.EXTRA_WIFI_P2P_DEVICE)));
         }
     }
 }
